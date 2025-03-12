@@ -16,26 +16,51 @@ DATA_UNDEFINED_NAME = '$undefined$'
 logger = logging.getLogger(__name__)
 
 
+# def get_single_tag_keys(parsed_label_config, control_type, object_type):
+#     """
+#     Gets parsed label config, and returns data keys related to the single control tag and the single object tag schema
+#     (e.g. one "Choices" with one "Text")
+#     :param parsed_label_config: parsed label config returned by "label_studio.misc.parse_config" function
+#     :param control_type: control tag str as it written in label config (e.g. 'Choices')
+#     :param object_type: object tag str as it written in label config (e.g. 'Text')
+#     :return: 3 string keys and 1 array of string labels: (from_name, to_name, value, labels)
+#     """
+#     assert len(parsed_label_config) == 1, "Please check your Labeling Interface configuration: At least one control tag should be in the labeling config."  # noqa
+#     from_name, info = list(parsed_label_config.items())[0]
+#     assert info['type'] == control_type, 'Label config has control tag "<' + info['type'] + '>" but "<' + control_type + '>" is expected for this model.'  # noqa
+
+#     assert len(info['to_name']) == 1
+#     assert len(info['inputs']) == 1
+#     assert info['inputs'][0]['type'] == object_type
+#     to_name = info['to_name'][0]
+#     value = info['inputs'][0]['value']
+#     return from_name, to_name, value, info['labels']
+
 def get_single_tag_keys(parsed_label_config, control_type, object_type):
     """
-    Gets parsed label config, and returns data keys related to the single control tag and the single object tag schema
-    (e.g. one "Choices" with one "Text")
-    :param parsed_label_config: parsed label config returned by "label_studio.misc.parse_config" function
-    :param control_type: control tag str as it written in label config (e.g. 'Choices')
-    :param object_type: object tag str as it written in label config (e.g. 'Text')
-    :return: 3 string keys and 1 array of string labels: (from_name, to_name, value, labels)
+    Gets parsed label config and returns data keys related to the specified control tag and object tag schema.
+    Iterates through all control tags to find the one matching the given control_type and object_type.
     """
-    assert len(parsed_label_config) == 1, "Please check your Labeling Interface configuration: At least one control tag should be in the labeling config."  # noqa
-    from_name, info = list(parsed_label_config.items())[0]
-    assert info['type'] == control_type, 'Label config has control tag "<' + info['type'] + '>" but "<' + control_type + '>" is expected for this model.'  # noqa
-
-    assert len(info['to_name']) == 1
-    assert len(info['inputs']) == 1
-    assert info['inputs'][0]['type'] == object_type
-    to_name = info['to_name'][0]
-    value = info['inputs'][0]['value']
-    return from_name, to_name, value, info['labels']
-
+    for from_name, info in parsed_label_config.items():
+        if info['type'] == control_type:
+            # Ensure the control tag has exactly one input and it matches the object_type
+            if len(info['inputs']) != 1:
+                continue
+            input_type = info['inputs'][0]['type']
+            if input_type == object_type:
+                # Validate the expected structure
+                assert len(info['to_name']) == 1, f"Expected exactly one to_name for {control_type}"
+                assert info['inputs'][0]['type'] == object_type, f"Input type mismatch for {control_type}"
+                
+                to_name = info['to_name'][0]
+                value = info['inputs'][0]['value']
+                labels = info['labels']
+                return from_name, to_name, value, labels
+    
+    raise AssertionError(
+        f"Could not find a control tag of type '{control_type}' "
+        f"with object type '{object_type}' in the label config."
+    )
 
 def get_first_tag_keys(parsed_label_config, control_type, object_type):
     """
