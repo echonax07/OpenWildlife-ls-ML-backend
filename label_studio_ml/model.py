@@ -97,7 +97,16 @@ class LabelStudioMLBase(ABC):
         """
         
         # self.set("model_version", "0.0.2")
+    
+    def get_versions(self):
+        """
+        Get the model versions.
+
+        Returns:
+            list: The model versions.
+        """
         
+        return []
         
     def use_label_config(self, label_config: str):
         """
@@ -146,9 +155,18 @@ class LabelStudioMLBase(ABC):
             return {}
             
     def get(self, key: str):
+        # from icecream import ic
+        # ic('get:')
+        # ic(self.project_id)
+        # ic(key)
         return CACHE[self.project_id, key]
 
     def set(self, key: str, value: str):
+        # from icecream import ic
+        # ic('set:')
+        # ic(self.project_id)
+        # ic(key)
+        # ic(value)
         CACHE[self.project_id, key] = value
 
     def has(self, key: str):
@@ -164,15 +182,12 @@ class LabelStudioMLBase(ABC):
 
     @property
     def model_version(self):
-        mv = self.get('model_version')
-        if mv:
-            try:
-                sv = Version.parse(mv)
-                return sv
-            except:
-                return mv
-        else:
-            return None
+        return self.get('model_version') if self.has('model_version') else None
+
+    @model_version.setter
+    def model_version(self, value):
+        self._model_version = value
+
 
     def bump_model_version(self):
         """
@@ -223,6 +238,19 @@ class LabelStudioMLBase(ABC):
     def fit(self, event, data, **additional_params):
         """
         Fit/update the model based on the specified event and data.
+
+        Args:
+          event: The event for which the model is fitted.
+          data: The data on which the model is fitted.
+          additional_params: Additional parameters (params after ** are optional named parameters)
+        """
+        # if there is a registered update function, use it
+        if _update_fn:
+            return _update_fn(event, data, helper=self, **additional_params)
+
+    def force_fit(self, event, data, **additional_params):
+        """
+        Force Fit/update the model based on the specified event and data.
 
         Args:
           event: The event for which the model is fitted.

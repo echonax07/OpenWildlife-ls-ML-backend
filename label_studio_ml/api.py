@@ -105,14 +105,12 @@ def _setup():
     model_version = model.get('model_version')
     return jsonify({'model_version': model_version})
 
-
 TRAIN_EVENTS = (
     'ANNOTATION_CREATED',
     'ANNOTATION_UPDATED',
     'ANNOTATION_DELETED',
     'START_TRAINING'
 )
-
 
 @_server.route('/webhook', methods=['POST'])
 def webhook():
@@ -132,6 +130,75 @@ def webhook():
 
     return response, 201
 
+@_server.route('/force_train', methods=['POST'])
+@exception_handler
+def _force_train():
+    """
+    Force retrain the model on specified tasks.
+
+    Example request:
+    {
+        'tasks': tasks,           # List of tasks to train on
+        'project': project_info,  # Project identifier (e.g., 'project.id.timestamp')
+        'label_config': config,   # Label configuration from the project
+        'params': { ... }         # Additional parameters (optional)
+    }
+    """
+    data = request.json
+    tasks = data.get('tasks')
+    project = data.get('project')
+    label_config = data.get('label_config')
+    params = data.get('params', {})
+    from icecream import ic
+    ic(data['project'])
+    ic(str(data['project']))
+    project_id = str(data['project'])
+
+    # Initialize the model with project settings
+    model = MODEL_CLASS(project_id=project_id, label_config=label_config)
+
+    # Prepare data structure similar to webhook events
+    fit_data = {
+        'project': {
+            'id': project_id,
+            'label_config': label_config
+        },
+        'tasks': tasks,
+        'params': params
+    }
+
+    # Trigger model training with a custom event
+    result = model.force_fit('FORCE_TRAIN', fit_data)
+
+    return jsonify({
+        'status': 'Training triggered' if result else 'Training failed',
+        'result': result
+    }), 200 if result else 500
+
+
+
+@_server.route('/clear_memory_bank', methods=['POST'])
+@exception_handler
+def _clear_memory_bank():
+    data = request.json
+    project_id = data.get('project').split('.', 1)[0]
+    label_config = data.get('label_config')  # Get label_config from request if needed
+    model = MODEL_CLASS(project_id=project_id, label_config=label_config)
+
+    status = model.clear_memory_bank()
+    if status:
+        return jsonify({
+            'status': 'success',
+            'message': 'Memory bank cleared successfully',
+            'project_id': project_id
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to clear memory bank',
+            'project_id': project_id
+        }), 500  # 500 = Internal Server Error
+        
 
 @_server.route('/health', methods=['GET'])
 @_server.route('/', methods=['GET'])
@@ -140,6 +207,18 @@ def health():
     return jsonify({
         'status': 'UP',
         'model_class': MODEL_CLASS.__name__
+    })
+
+@_server.route('/versions', methods=['GET'])
+@exception_handler
+def versions():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    model_versions = model.get_versions()
+    return jsonify({
+        'versions': model_versions
     })
 
 
