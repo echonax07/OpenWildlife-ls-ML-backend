@@ -1,0 +1,53 @@
+[project]
+name = "label-studio-ml-backend"
+
+[tool.poetry]
+name = "label-studio-ml-backend"
+version = "1.0.8"
+description = ""
+readme = "README.md"
+authors = []
+keywords = []
+
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed"
+]
+packages = [
+    { include = "label_studio_ml"}
+]
+
+[tool.poetry.scripts]
+label-studio-ml = "label_studio_ml.server:main"
+
+[project.urls]
+Repository = 'https://github.com/HumanSignal/label-studio-ml-backend'
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4"
+flask = "^2.3"
+gunicorn = "23.0.0"
+colorama = "*" 
+requests = "*"
+semver = "*"
+pillow = "^10.3"
+botocore = "*"
+boto3 = "*"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
