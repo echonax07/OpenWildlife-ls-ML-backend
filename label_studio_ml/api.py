@@ -1,6 +1,7 @@
 import hmac
 import logging
 import os
+import json
 
 from flask import Flask, request, jsonify, Response
 
@@ -14,6 +15,7 @@ _server = Flask(__name__)
 MODEL_CLASS = LabelStudioMLBase
 BASIC_AUTH = None
 
+from icecream import ic
 
 def init_app(model_class, basic_auth_user=None, basic_auth_pass=None):
     global MODEL_CLASS
@@ -53,6 +55,7 @@ def _predict():
     @return:
     Predictions in LS format
     """
+    ic("predict is called")
     data = request.json
     tasks = data.get('tasks')
     label_config = data.get('label_config')
@@ -92,10 +95,15 @@ def _predict():
 @_server.route('/setup', methods=['POST'])
 @exception_handler
 def _setup():
+    ic("Setup is called")
     data = request.json
     project_id = data.get('project').split('.', 1)[0]
     label_config = data.get('schema')
     extra_params = data.get('extra_params')
+    # If extra_params is a dictionary, convert it to a JSON string
+    if isinstance(extra_params, dict):
+        extra_params = json.dumps(extra_params)
+
     model = MODEL_CLASS(project_id=project_id,
                         label_config=label_config)
 
@@ -204,6 +212,7 @@ def _clear_memory_bank():
 @_server.route('/', methods=['GET'])
 @exception_handler
 def health():
+    ic("Health is called")
     return jsonify({
         'status': 'UP',
         'model_class': MODEL_CLASS.__name__
@@ -221,6 +230,18 @@ def versions():
         'versions': model_versions
     })
 
+
+@_server.route('/extra-params', methods=['GET'])
+@exception_handler
+def extra_params_config():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    model_versions = model.get_model_extra_params_config()
+    return jsonify({
+        'extra_params': model_versions
+    })
 
 @_server.route('/metrics', methods=['GET'])
 @exception_handler

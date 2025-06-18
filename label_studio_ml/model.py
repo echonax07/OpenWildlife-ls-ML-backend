@@ -107,6 +107,16 @@ class LabelStudioMLBase(ABC):
         """
         
         return []
+
+    def get_model_extra_params_config(self):
+        """
+        Get the configuration for any extra parameters that the model needs for training and testing, including names, types, and defaults.
+
+        Returns:
+            dict: A dictionary containing the configuration for extra parameters.
+        """
+
+        return {}
         
     def use_label_config(self, label_config: str):
         """
