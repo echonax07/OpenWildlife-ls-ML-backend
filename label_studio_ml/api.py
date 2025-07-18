@@ -4,10 +4,15 @@ import os
 import json
 
 from flask import Flask, request, jsonify, Response
+from rq.job import Job
+from redis import Redis
 
 from .response import ModelResponse
 from .model import LabelStudioMLBase
 from .exceptions import exception_handler
+
+
+redis_conn = Redis(host='localhost', port=6379)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +130,17 @@ def webhook():
     data = request.json
     event = data.pop('action')
     if event not in TRAIN_EVENTS:
+        # TODO: This is a hard-codey way to handle the PROJECT_UPDATED event specifically for model version updates.
+        # Ideally, this should be handled in a more generic way.
+        if event == "PROJECT_UPDATED":
+            if "model_save_name" in data['project'] and data["project"]["model_save_name"]:
+                model = MODEL_CLASS(project_id=str(data['project']['id']),
+                                    label_config=data['project']['label_config'])
+                model.save_current_version_as(data['project']['model_save_name'])
+            if "model_version" in data['project'] and data['project']['model_version']:
+                model = MODEL_CLASS(project_id=str(data['project']['id']),
+                                    label_config=data['project']['label_config'])
+                model.set('model_version', data['project']['model_version'])
         return jsonify({'status': 'Unknown event'}), 200
     project_id = str(data['project']['id'])
     label_config = data['project']['label_config']
@@ -178,11 +194,16 @@ def _force_train():
     # Trigger model training with a custom event
     result = model.force_fit('FORCE_TRAIN', fit_data)
 
-    return jsonify({
-        'status': 'Training triggered' if result else 'Training failed',
-        'result': result
-    }), 200 if result else 500
-
+    if result['error'] is None:
+        return jsonify({
+            'status': 'Training triggered',
+            'job': result['job_id']
+        }), 200
+    else:
+        return jsonify({
+            'status': 'Training setup failed',
+            'error': result['error']
+        }), 500  # 500 = Internal Server Error
 
 
 @_server.route('/clear_memory_bank', methods=['POST'])
@@ -230,6 +251,70 @@ def versions():
         'versions': model_versions
     })
 
+@_server.route('/job_status', methods=['GET'])
+@exception_handler
+def job_status():
+    data = request.json
+    job_id = data.get('job_id')
+
+    if not job_id:
+        return jsonify({
+            'message': 'Job ID is required'
+        }), 400
+    
+    job = Job.fetch(job_id, connection=redis_conn)
+    if job is None:
+        # Do something, return an error.
+        return jsonify({
+            'message': f'Job with ID {job_id} not found'
+        }), 404
+
+    status = job.get_status()
+    print(f"JOB STATUS FOR {job_id}: ", status)
+    # "scheduled", "deferred" currently not supported.
+    if status not in ['queued', 'started', 'finished', 'failed', 'canceled', 'stopped']:
+        return jsonify({
+            'message': f'Unknown job status: {status}'
+        }), 500
+    
+    # API status is 200 OK even if the job fails. We're just returning what it is.
+    return jsonify({
+        'job_status': status,
+        'job_id': job_id,
+    }), 200
+
+@_server.route('/train_status', methods=['GET'])
+@exception_handler
+def train_status():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    status = model.get("training_status") if model.has("training_status") else "COMPLETE/IDLE"
+    
+    return jsonify({
+        'status': status
+    }), 200 if status else 500
+
+@_server.route('/custom_weights_path', methods=['POST'])
+@exception_handler
+def custom_weights_path():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    print(data)
+    print("CHECKING WEIGHTS PATH", data.get('custom_weights_path'))
+    if model.load_weights_from_path(data.get('custom_weights_path')):
+        return jsonify({
+            'status': 'success',
+            'message': 'Weights loaded successfully'
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to load weights: path not found or invalid'
+        }), 400
 
 @_server.route('/extra-params', methods=['GET'])
 @exception_handler
