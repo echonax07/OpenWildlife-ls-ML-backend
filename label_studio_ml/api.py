@@ -283,19 +283,6 @@ def job_status():
         'job_id': job_id,
     }), 200
 
-@_server.route('/train_status', methods=['GET'])
-@exception_handler
-def train_status():
-    data = request.json
-    project = str(data.get('project'))
-    project_id = project.split('.', 1)[0] if project else None
-    model = MODEL_CLASS(project_id=project_id, label_config=None)
-    status = model.get("training_status") if model.has("training_status") else "COMPLETE/IDLE"
-    
-    return jsonify({
-        'status': status
-    }), 200 if status else 500
-
 @_server.route('/custom_weights_path', methods=['POST'])
 @exception_handler
 def custom_weights_path():
