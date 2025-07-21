@@ -61,7 +61,6 @@ class LabelStudioMLBase(ABC):
     This is the base class for all LabelStudio Machine Learning models.
     It provides the structure and functions necessary for the machine learning models.
     """
-    INITIAL_MODEL_VERSION = "0.0.1"
     
     TRAIN_EVENTS = (
         'ANNOTATION_CREATED',
@@ -82,10 +81,6 @@ class LabelStudioMLBase(ABC):
             self.use_label_config(label_config)
         else:
             logger.warning('Label config is not provided')
-
-        # set initial model version
-        if not self.model_version:
-            self.set("model_version", self.INITIAL_MODEL_VERSION)
         
         self.setup()
         
@@ -210,7 +205,35 @@ class LabelStudioMLBase(ABC):
         self.set('model_version', str(mv))
         
         return mv
+
+    def load_weights_from_path(self, path: str):
+        """
+        Load model weights from a given path.
+
+        Args:
+            path (str): The path to the model weights.
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'Model weights file not found at {path}')
         
+        return True # Placeholder for actual loading logic
+
+    def save_current_version_as(self, name: str):
+        """
+        Save the current model version with the given name
+
+        Args:
+            name (str): A custom name to save the current model version as.
+        """
+        mv = Version.parse(self.model_version)
+        mv = mv.replace(
+            major=int(name.split('.')[0]),
+            minor=int(name.split('.')[1]),
+            patch=int(name.split('.')[2])
+        )
+        logger.debug(f'Saving model version {self.model_version} as {mv}')
+        self.set('model_version', str(mv))
+
     # @abstractmethod
     def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> Union[List[Dict], ModelResponse]:
         """
