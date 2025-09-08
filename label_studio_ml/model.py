@@ -61,7 +61,6 @@ class LabelStudioMLBase(ABC):
     This is the base class for all LabelStudio Machine Learning models.
     It provides the structure and functions necessary for the machine learning models.
     """
-    INITIAL_MODEL_VERSION = "0.0.1"
     
     TRAIN_EVENTS = (
         'ANNOTATION_CREATED',
@@ -82,10 +81,6 @@ class LabelStudioMLBase(ABC):
             self.use_label_config(label_config)
         else:
             logger.warning('Label config is not provided')
-
-        # set initial model version
-        if not self.model_version:
-            self.set("model_version", self.INITIAL_MODEL_VERSION)
         
         self.setup()
         
@@ -97,7 +92,26 @@ class LabelStudioMLBase(ABC):
         """
         
         # self.set("model_version", "0.0.2")
+    
+    def get_versions(self):
+        """
+        Get the model versions.
+
+        Returns:
+            list: The model versions.
+        """
         
+        return []
+
+    def get_model_extra_params_config(self):
+        """
+        Get the configuration for any extra parameters that the model needs for training and testing, including names, types, and defaults.
+
+        Returns:
+            dict: A dictionary containing the configuration for extra parameters.
+        """
+
+        return {}
         
     def use_label_config(self, label_config: str):
         """
@@ -164,15 +178,12 @@ class LabelStudioMLBase(ABC):
 
     @property
     def model_version(self):
-        mv = self.get('model_version')
-        if mv:
-            try:
-                sv = Version.parse(mv)
-                return sv
-            except:
-                return mv
-        else:
-            return None
+        return self.get('model_version') if self.has('model_version') else None
+
+    @model_version.setter
+    def model_version(self, value):
+        self._model_version = value
+
 
     def bump_model_version(self):
         """
@@ -185,7 +196,35 @@ class LabelStudioMLBase(ABC):
         self.set('model_version', str(mv))
         
         return mv
+
+    def load_weights_from_path(self, path: str):
+        """
+        Load model weights from a given path.
+
+        Args:
+            path (str): The path to the model weights.
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'Model weights file not found at {path}')
         
+        return True # Placeholder for actual loading logic
+
+    def save_current_version_as(self, name: str):
+        """
+        Save the current model version with the given name
+
+        Args:
+            name (str): A custom name to save the current model version as.
+        """
+        mv = Version.parse(self.model_version)
+        mv = mv.replace(
+            major=int(name.split('.')[0]),
+            minor=int(name.split('.')[1]),
+            patch=int(name.split('.')[2])
+        )
+        logger.debug(f'Saving model version {self.model_version} as {mv}')
+        self.set('model_version', str(mv))
+
     # @abstractmethod
     def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> Union[List[Dict], ModelResponse]:
         """
@@ -223,6 +262,19 @@ class LabelStudioMLBase(ABC):
     def fit(self, event, data, **additional_params):
         """
         Fit/update the model based on the specified event and data.
+
+        Args:
+          event: The event for which the model is fitted.
+          data: The data on which the model is fitted.
+          additional_params: Additional parameters (params after ** are optional named parameters)
+        """
+        # if there is a registered update function, use it
+        if _update_fn:
+            return _update_fn(event, data, helper=self, **additional_params)
+
+    def force_fit(self, event, data, **additional_params):
+        """
+        Force Fit/update the model based on the specified event and data.
 
         Args:
           event: The event for which the model is fitted.

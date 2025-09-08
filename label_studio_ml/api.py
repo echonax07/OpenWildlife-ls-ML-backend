@@ -1,19 +1,30 @@
 import hmac
 import logging
 import os
+import json
 
 from flask import Flask, request, jsonify, Response
+from rq.job import Job
+from redis import Redis
 
 from .response import ModelResponse
 from .model import LabelStudioMLBase
 from .exceptions import exception_handler
+
+
+
+redis_host = os.getenv('REDIS_HOST', 'localhost')
+redis_port = int(os.getenv('REDIS_PORT', 6379))
+# ic(redis_host, redis_port)
+# Initialize Redis connection
+redis_conn = Redis(host=redis_host, port=redis_port)
 
 logger = logging.getLogger(__name__)
 
 _server = Flask(__name__)
 MODEL_CLASS = LabelStudioMLBase
 BASIC_AUTH = None
-
+from icecream import ic
 
 def init_app(model_class, basic_auth_user=None, basic_auth_pass=None):
     global MODEL_CLASS
@@ -53,12 +64,14 @@ def _predict():
     @return:
     Predictions in LS format
     """
+    ic("predict is called")
     data = request.json
     tasks = data.get('tasks')
     label_config = data.get('label_config')
     project = str(data.get('project'))
     project_id = project.split('.', 1)[0] if project else None
     params = data.get('params', {})
+    params["project_id"] = project_id
     context = params.pop('context', {})
 
     model = MODEL_CLASS(project_id=project_id,
@@ -92,10 +105,16 @@ def _predict():
 @_server.route('/setup', methods=['POST'])
 @exception_handler
 def _setup():
+    ic("Setup is called")
     data = request.json
     project_id = data.get('project').split('.', 1)[0]
     label_config = data.get('schema')
     extra_params = data.get('extra_params')
+    ic(extra_params)
+    # If extra_params is a dictionary, convert it to a JSON string
+    if isinstance(extra_params, dict):
+        extra_params = json.dumps(extra_params)
+
     model = MODEL_CLASS(project_id=project_id,
                         label_config=label_config)
 
@@ -105,7 +124,6 @@ def _setup():
     model_version = model.get('model_version')
     return jsonify({'model_version': model_version})
 
-
 TRAIN_EVENTS = (
     'ANNOTATION_CREATED',
     'ANNOTATION_UPDATED',
@@ -113,12 +131,22 @@ TRAIN_EVENTS = (
     'START_TRAINING'
 )
 
-
 @_server.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
     event = data.pop('action')
     if event not in TRAIN_EVENTS:
+        # TODO: This is a hard-codey way to handle the PROJECT_UPDATED event specifically for model version updates.
+        # Ideally, this should be handled in a more generic way.
+        if event == "PROJECT_UPDATED":
+            if "model_save_name" in data['project'] and data["project"]["model_save_name"]:
+                model = MODEL_CLASS(project_id=str(data['project']['id']),
+                                    label_config=data['project']['label_config'])
+                model.save_current_version_as(data['project']['model_save_name'])
+            if "model_version" in data['project'] and data['project']['model_version']:
+                model = MODEL_CLASS(project_id=str(data['project']['id']),
+                                    label_config=data['project']['label_config'])
+                model.set('model_version', data['project']['model_version'])
         return jsonify({'status': 'Unknown event'}), 200
     project_id = str(data['project']['id'])
     label_config = data['project']['label_config']
@@ -132,16 +160,180 @@ def webhook():
 
     return response, 201
 
+@_server.route('/force_train', methods=['POST'])
+@exception_handler
+def _force_train():
+    """
+    Force retrain the model on specified tasks.
+
+    Example request:
+    {
+        'tasks': tasks,           # List of tasks to train on
+        'project': project_info,  # Project identifier (e.g., 'project.id.timestamp')
+        'label_config': config,   # Label configuration from the project
+        'params': { ... }         # Additional parameters (optional)
+    }
+    """
+    data = request.json
+    tasks = data.get('tasks')
+    project = data.get('project')
+    label_config = data.get('label_config')
+    params = data.get('params', {})
+    from icecream import ic
+    ic(data['project'])
+    ic(str(data['project']))
+    project_id = str(data['project'])
+
+    # Initialize the model with project settings
+    model = MODEL_CLASS(project_id=project_id, label_config=label_config)
+
+    # Prepare data structure similar to webhook events
+    fit_data = {
+        'project': {
+            'id': project_id,
+            'label_config': label_config
+        },
+        'tasks': tasks,
+        'params': params
+    }
+
+    # Trigger model training with a custom event
+    result = model.force_fit('FORCE_TRAIN', fit_data)
+
+    if result['error'] is None:
+        return jsonify({
+            'status': 'Training triggered',
+            'job': result['job_id']
+        }), 200
+    else:
+        return jsonify({
+            'status': 'Training setup failed',
+            'error': result['error']
+        }), 500  # 500 = Internal Server Error
+
+
+@_server.route('/clear_memory_bank', methods=['POST'])
+@exception_handler
+def _clear_memory_bank():
+    data = request.json
+    project_id = data.get('project').split('.', 1)[0]
+    label_config = data.get('label_config')  # Get label_config from request if needed
+    model = MODEL_CLASS(project_id=project_id, label_config=label_config)
+
+    status = model.clear_memory_bank()
+    if status:
+        return jsonify({
+            'status': 'success',
+            'message': 'Memory bank cleared successfully',
+            'project_id': project_id
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to clear memory bank',
+            'project_id': project_id
+        }), 500  # 500 = Internal Server Error
+        
 
 @_server.route('/health', methods=['GET'])
 @_server.route('/', methods=['GET'])
 @exception_handler
 def health():
+    ic("Health is called")
     return jsonify({
         'status': 'UP',
         'model_class': MODEL_CLASS.__name__
     })
 
+@_server.route('/versions', methods=['GET'])
+@exception_handler
+def versions():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    model_versions = model.get_versions()
+    return jsonify({
+        'versions': model_versions
+    })
+
+@_server.route('/job_status', methods=['GET'])
+@exception_handler
+def job_status():
+    data = request.json
+    job_id = data.get('job_id')
+
+    if not job_id:
+        return jsonify({
+            'message': 'Job ID is required'
+        }), 400
+    
+    job = Job.fetch(job_id, connection=redis_conn)
+    if job is None:
+        # Do something, return an error.
+        return jsonify({
+            'message': f'Job with ID {job_id} not found'
+        }), 404
+
+    status = job.get_status()
+    print(f"JOB STATUS FOR {job_id}: ", status)
+    # "scheduled", "deferred" currently not supported.
+    if status not in ['queued', 'started', 'finished', 'failed', 'canceled', 'stopped']:
+        return jsonify({
+            'message': f'Unknown job status: {status}'
+        }), 500
+    
+    # API status is 200 OK even if the job fails. We're just returning what it is.
+    return jsonify({
+        'job_status': status,
+        'job_id': job_id,
+    }), 200
+
+@_server.route('/train_status', methods=['GET'])
+@exception_handler
+def train_status():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    status = model.get("training_status") if model.has("training_status") else "COMPLETE/IDLE"
+    
+    return jsonify({
+        'status': status
+    }), 200 if status else 500
+
+@_server.route('/custom_weights_path', methods=['POST'])
+@exception_handler
+def custom_weights_path():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    print(data)
+    print("CHECKING WEIGHTS PATH", data.get('custom_weights_path'))
+    if model.load_weights_from_path(data.get('custom_weights_path')):
+        return jsonify({
+            'status': 'success',
+            'message': 'Weights loaded successfully'
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to load weights: path not found or invalid'
+        }), 400
+
+@_server.route('/extra-params', methods=['GET'])
+@exception_handler
+def extra_params_config():
+    data = request.json
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    model = MODEL_CLASS(project_id=project_id, label_config=None)
+    model_params = model.get_model_extra_params_config()
+    ic(model_params)
+    return jsonify({
+        'extra_params': model_params
+    })
 
 @_server.route('/metrics', methods=['GET'])
 @exception_handler
