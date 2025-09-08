@@ -160,9 +160,18 @@ class LabelStudioMLBase(ABC):
             return {}
             
     def get(self, key: str):
+        # from icecream import ic
+        # ic('get:')
+        # ic(self.project_id)
+        # ic(key)
         return CACHE[self.project_id, key]
 
     def set(self, key: str, value: str):
+        # from icecream import ic
+        # ic('set:')
+        # ic(self.project_id)
+        # ic(key)
+        # ic(value)
         CACHE[self.project_id, key] = value
 
     def has(self, key: str):
