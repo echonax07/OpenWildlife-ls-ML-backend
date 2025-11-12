@@ -234,6 +234,12 @@ class LabelStudioMLBase(ABC):
         logger.debug(f'Saving model version {self.model_version} as {mv}')
         self.set('model_version', str(mv))
 
+    def queue_predict(self, tasks: List[Dict], project_id, context = None, **kwargs) -> dict:
+        return {
+            'job_id': '',
+            'error': "Queue predict is not implemented in this model",
+        }
+
     # @abstractmethod
     def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> Union[List[Dict], ModelResponse]:
         """
