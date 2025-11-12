@@ -41,6 +41,38 @@ def init_app(model_class, basic_auth_user=None, basic_auth_pass=None):
 
     return _server
 
+@_server.route('/queue_predict', methods=['POST'])
+@exception_handler
+def queue_predict():
+    ic("Queued predict is called")
+    data = request.json
+    tasks = data.get('tasks')
+    label_config = data.get('label_config')
+    project = str(data.get('project'))
+    project_id = project.split('.', 1)[0] if project else None
+    params = data.get('params', {})
+    params["project_id"] = project_id
+    context = params.pop('context', {})
+
+    model = MODEL_CLASS(project_id=project_id,
+                        label_config=label_config)
+
+    # model.use_label_config(label_config)
+
+    result = model.queue_predict(tasks, context=context, **params)
+    
+    if result['error'] is None:
+        return jsonify({
+            'status': 'Prediction triggered',
+            'job': result['job_id']
+        }), 200
+    else:
+        return jsonify({
+            'status': 'Prediction setup failed',
+            'error': result['error']
+        }), 500  # 500 = Internal Server Error
+
+
 
 @_server.route('/predict', methods=['POST'])
 @exception_handler
@@ -283,24 +315,18 @@ def job_status():
             'message': f'Unknown job status: {status}'
         }), 500
     
-    # API status is 200 OK even if the job fails. We're just returning what it is.
-    return jsonify({
-        'job_status': status,
-        'job_id': job_id,
-    }), 200
-
-@_server.route('/train_status', methods=['GET'])
-@exception_handler
-def train_status():
-    data = request.json
-    project = str(data.get('project'))
-    project_id = project.split('.', 1)[0] if project else None
-    model = MODEL_CLASS(project_id=project_id, label_config=None)
-    status = model.get("training_status") if model.has("training_status") else "COMPLETE/IDLE"
-    
-    return jsonify({
-        'status': status
-    }), 200 if status else 500
+    if status == 'finished':
+        return jsonify({
+            'job_status': status,
+            'job_id': job_id,
+            'result': job.result
+        }), 200
+    else:
+        # API status is 200 OK even if the job fails. We're just returning what it is.
+        return jsonify({
+            'job_status': status,
+            'job_id': job_id,
+        }), 200
 
 @_server.route('/custom_weights_path', methods=['POST'])
 @exception_handler
