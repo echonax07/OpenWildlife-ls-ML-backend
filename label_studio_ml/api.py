@@ -316,10 +316,11 @@ def job_status():
         }), 500
     
     if status == 'finished':
+        result = {} if not isinstance(job.result, list) else job.result
         return jsonify({
             'job_status': status,
             'job_id': job_id,
-            'result': job.result
+            'result': result
         }), 200
     else:
         # API status is 200 OK even if the job fails. We're just returning what it is.
